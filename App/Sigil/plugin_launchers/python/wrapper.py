@@ -35,7 +35,9 @@ import unipath
 from unipath import pathof
 import unicodedata
 
-_launcher_version=20141204
+_launcher_version=20160130
+
+_PKG_VER = re.compile(r'''<\s*package[^>]*version\s*=\s*["']([^'"]*)['"][^>]*>''',re.IGNORECASE)
 
 # Wrapper Class is used to peform record keeping for Sigil.  It keeps track of modified,
 # added, and deleted files while providing some degree of protection against files under
@@ -54,8 +56,8 @@ ext_mime_map = {
                 '.svg'  : 'image/svg+xml',
                 '.xhtml': 'application/xhtml+xml',
                 '.html' : 'application/xhtml+xml',
+                '.otf'  : 'application/vnd.ms-opentype',
                 '.ttf'  : 'application/x-font-ttf',
-                '.otf'  : 'application/x-font-opentype',
                 '.woff' : 'application/font-woff',
                 '.mp3'  : 'audio/mpeg',
                 '.mp4'  : 'video/mp4',
@@ -68,7 +70,7 @@ ext_mime_map = {
                 '.js'   : 'text/javascript',
                 '.epub' : 'application/epub+zip',
                 #'.js'   : 'application/javascript',
-                #'.otf'  : 'application/vnd.ms-opentype',
+                #'.otf'  : 'application/x-font-opentype',
                 }
 
 mime_base_map = {
@@ -113,14 +115,36 @@ class Wrapper(object):
         self.plugin_dir = pathof(plugin_dir)
         self.plugin_name = plugin_name
         self.outdir = pathof(outdir)
+
+        # initialize the sigil cofiguration info passed in outdir with sigil.cfg
+        self.appdir = None
+        self.usrsupdir = None
+        self.selected = []
+        cfg = ''
+        with open(os.path.join(self.outdir, 'sigil.cfg'), 'rb') as f:
+            cfg = f.read().decode('utf-8')
+        cfg = cfg.replace("\r", "")
+        cfg_lst = cfg.split("\n")
+        if len(cfg_lst) >= 2:
+            self.appdir = cfg_lst.pop(0)
+            self.usrsupdir = cfg_lst.pop(0)
+            self.selected = cfg_lst
+        os.environ['SigilGumboLibPath'] = self.get_gumbo_path()
+
         # dictionaries used to map opf manifest information
         self.id_to_href = {}
         self.id_to_mime = {}
         self.href_to_id = {}
+        self.id_to_props = {}
+        self.id_to_fall = {}
+        self.id_to_over = {}
         self.spine_ppd = None
         self.spine = []
         self.guide = []
-        self.package_tag = ''
+        self.package_tag = None
+        self.epub_version = None
+        # self.metadata_attr = None
+        # self.metadata = []
         self.metadataxml = ''
         self.op = op
         if self.op is not None:
@@ -129,10 +153,16 @@ class Wrapper(object):
             self.id_to_href = op.get_manifest_id_to_href_dict().copy()
             self.id_to_mime = op.get_manifest_id_to_mime_dict().copy()
             self.href_to_id = op.get_href_to_manifest_id_dict().copy()
+            self.id_to_props = op.get_manifest_id_to_properties_dict().copy()
+            self.id_to_fall = op.get_manifest_id_to_fallback_dict().copy()
+            self.id_to_over = op.get_manifest_id_to_overlay_dict().copy()
             self.spine_ppd = op.get_spine_ppd()
             self.spine = op.get_spine()
             self.guide = op.get_guide()
             self.package_tag = op.get_package_tag()
+            self.epub_version = op.get_epub_version()
+            # self.metadata = op.get_metadata()
+            # self.metadata_attr = op.get_metadata_attr()
             self.metadataxml = op.get_metadataxml()
         self.other = []  # non-manifest file information
         self.id_to_filepath = {}
@@ -162,6 +192,8 @@ class Wrapper(object):
         global _launcher_version
         return _launcher_version
 
+    def getepubversion(self):
+        return self.epub_version
 
     # utility routine to get mime from href
     def getmime(self,  href):
@@ -174,13 +206,28 @@ class Wrapper(object):
 
     # routines to rebuild the opf on the fly from current information
 
+    def build_package_starttag(self):
+        return self.package_tag
+
     def build_manifest_xml(self):
         manout = []
         manout.append('<manifest>\n')
         for id in sorted(self.id_to_mime):
             href = quoteurl(self.id_to_href[id])
             mime = self.id_to_mime[id]
-            manout.append('<item id="%s" href="%s" media-type="%s" />\n' % (id, href, mime))
+            props = ''
+            properties = self.id_to_props[id]
+            if properties is not None:
+                props = ' properties="%s"' % properties
+            fall = ''
+            fallback = self.id_to_fall[id]
+            if fallback is not None:
+                fall = ' fallback="%s"' % fallback
+            over = ''
+            overlay = self.id_to_over[id]
+            if overlay is not None:
+                over = ' media-overlay="%s"' % overlay
+            manout.append('<item id="%s" href="%s" media-type="%s"%s%s%s />\n' % (id, href, mime, props, fall, over))
         manout.append('</manifest>\n')
         return "".join(manout)
 
@@ -198,11 +245,14 @@ class Wrapper(object):
         if pagemapid is not None:
             map = ' page-map="%s"' % pagemapid
         spineout.append('<spine%s%s%s>\n' %(ppd, ncx, map))
-        for (id, linear) in self.spine:
+        for (id, linear, properties) in self.spine:
             lin = ''
             if linear is not None:
                 lin = ' linear="%s"' % linear
-            spineout.append('<itemref idref="%s"%s/>\n' % (id, lin))
+            props = ''
+            if properties is not None:
+                props = ' properties="%s"' % properties
+            spineout.append('<itemref idref="%s"%s%s/>\n' % (id, lin, props))
         spineout.append('</spine>\n')
         return "".join(spineout)
 
@@ -218,7 +268,7 @@ class Wrapper(object):
     def build_opf(self):
         data = []
         data.append('<?xml version="1.0" encoding="utf-8" standalone="yes"?>\n')
-        data.append(self.package_tag)
+        data.append(self.build_package_starttag())
         data.append(self.metadataxml)
         data.append(self.build_manifest_xml())
         data.append(self.build_spine_xml())
@@ -257,11 +307,15 @@ class Wrapper(object):
     # routines to manipulate the spine
 
     def getspine(self):
-        return self.spine
+        osp = []
+        for (sid, linear, properties) in self.spine:
+            osp.append((sid, linear))
+        return osp
 
     def setspine(self,new_spine):
         spine = []
         for (sid, linear) in new_spine:
+            properties = None
             sid = unicode_str(sid)
             linear = unicode_str(linear)
             if sid not in self.id_to_href:
@@ -270,32 +324,76 @@ class Wrapper(object):
                 linear = linear.lower()
                 if linear not in ['yes', 'no']:
                     raise Exception('Improper Spine Linear Attribute')
-            spine.append((sid, linear))
+            spine.append((sid, linear, properties))
         self.spine = spine
         self.modified['OEBPS/content.opf'] = 'file'
 
-    def spine_insert_before(self, pos, sid, linear):
+    def getspine_epub3(self):
+        return self.spine
+
+    def setspine_epub3(self, new_spine):
+        spine = []
+        for (sid, linear, properties) in new_spine:
+            sid = unicode_str(sid)
+            linear = unicode_str(linear)
+            properties = unicode_str(properties)
+            if properties is not None and properties == "":
+                properties = None
+            if sid not in self.id_to_href:
+                raise WrapperException('Spine Id not in Manifest')
+            if linear is not None:
+                linear = linear.lower()
+                if linear not in ['yes', 'no']:
+                    raise Exception('Improper Spine Linear Attribute')
+            if properties is not None:
+                properties = properties.lower()
+            spine.append((sid, linear, properties))
+        self.spine = spine
+        self.modified['OEBPS/content.opf'] = 'file'
+
+    def spine_insert_before(self, pos, sid, linear, properties=None):
         sid = unicode_str(sid)
         linear = unicode_str(linear)
+        properties = unicode_str(properties)
+        if properties is not None and properties == "":
+            properties = None
         if sid not in self.id_to_mime:
             raise WrapperException('that spine idref does not exist in manifest')
         n = len(self.spine)
         if pos == 0:
-            self.spine = [(sid, linear)] + self.spine
+            self.spine = [(sid, linear, properties)] + self.spine
         elif pos == -1 or pos >= n:
-            self.spine = self.spine.append((sid, linear))
+            self.spine.append((sid, linear, properties))
         else:
-            self.spine = self.spine[0:pos] + [(sid, linear)] + self.spine[pos:]
+            self.spine = self.spine[0:pos] + [(sid, linear, properties)] + self.spine[pos:]
         self.modified['OEBPS/content.opf'] = 'file'
 
     def getspine_ppd(self):
         return self.spine_ppd
 
-    def setspineppd(self, ppd):
+    def setspine_ppd(self, ppd):
         ppd = unicode_str(ppd)
         if ppd not in ['rtl', 'ltr', None]:
             raise WrapperException('incorrect page-progression direction')
         self.spine_ppd = ppd
+        self.modified['OEBPS/content.opf'] = 'file'
+
+    def setspine_itemref_epub3_attributes(idref, linear, properties):
+        idref = unicode_str(idref)
+        linear = unicode_str(linear)
+        properties = unicode_str(properties)
+        if properties is not None and properties == "":
+            properties = None
+        pos = -1
+        i = 0
+        for (sid, slinear, sproperties) in self.spine:
+            if sid == idref:
+                pos = i
+                break;
+            i += 1
+        if pos == -1:
+            raise WrapperException('that idref is not exist in the spine')
+        self.spine[pos] = (sid, linear, properties)
         self.modified['OEBPS/content.opf'] = 'file'
 
 
@@ -333,12 +431,18 @@ class Wrapper(object):
 
 
     # routines to get and set the package tag
-
     def getpackagetag(self):
         return self.package_tag
 
     def setpackagetag(self, new_packagetag):
-        self.package_tag = unicode_str(new_packagetag)
+        pkgtag = unicode_str(new_packagetag)
+        version = ""
+        mo = _PKG_VER.search(pkgtag)
+        if mo:
+            version = mo.group(1)
+        if version != self.epub_version:
+            raise WrapperException('Illegal to change the package version attribute')
+        self.package_tag = pkgtag
         self.modified['OEBPS/content.opf'] = 'file'
 
 
@@ -384,7 +488,7 @@ class Wrapper(object):
             fp.write(data)
         self.modified[id] = 'file'
 
-    def addfile(self, uniqueid, basename, data, mime=None):
+    def addfile(self, uniqueid, basename, data, mime=None, properties=None, fallback=None, overlay=None):
         uniqueid = unicode_str(uniqueid)
         basename = unicode_str(basename)
         mime = unicode_str(mime)
@@ -419,6 +523,9 @@ class Wrapper(object):
             fp.write(data)
         self.id_to_href[uniqueid] = href
         self.id_to_mime[uniqueid] = mime
+        self.id_to_props[uniqueid] = properties
+        self.id_to_fall[uniqueid] = fallback
+        self.id_to_over[uniqueid] = overlay
         self.href_to_id[href] = uniqueid
         self.added.append(uniqueid)
         self.modified['OEBPS/content.opf'] = 'file'
@@ -447,21 +554,45 @@ class Wrapper(object):
         mime = self.id_to_mime[id]
         del self.id_to_href[id]
         del self.id_to_mime[id]
+        del self.id_to_props[id]
+        del self.id_to_fall[id]
+        del self.id_to_over[id]
         del self.href_to_id[href]
         # remove from spine
         new_spine = []
         was_modified = False
-        for sid, linear in self.spine:
+        for sid, linear, properties in self.spine:
             if sid != id:
-                new_spine.append((sid, linear))
+                new_spine.append((sid, linear, properties))
             else:
                 was_modified = True
         if was_modified:
-            self.setspine(new_spine)
+            self.setspine_epub3(new_spine)
         if add_to_deleted:
             self.deleted.append(('manifest', id, href))
             self.modified['OEBPS/content.opf'] = 'file'
         del self.id_to_filepath[id]
+
+    def set_manifest_epub3_attributes(self, id, properties=None, fallback=None, overlay=None):
+        id = unicode_str(id)
+        properties = unicode_str(properties)
+        if properties is not None and properties == "":
+            properties = None
+        fallback = unicode_str(fallback)
+        if fallback is not None and fallback == "":
+            fallback = None
+        overlay = unicode_str(overlay)
+        if overlay is not None and overlay == "":
+            overlay = None
+        if id not in self.id_to_props:
+            raise WrapperException('Id does not exist in manifest')
+        del self.id_to_props[id]
+        del self.id_to_fall[id]
+        del self.id_to_over[id]
+        self.id_to_props[id] = properties
+        self.id_to_fall[id] = fallback
+        self.id_to_over[id] = overlay
+        self.modified['OEBPS/content.opf'] = 'file'
 
 
     # helpful mapping routines for file info from the opf manifest
@@ -491,6 +622,18 @@ class Wrapper(object):
     def map_id_to_mime(self, id, ow):
         id = unicode_str(id)
         return self.id_to_mime.get(id, ow)
+
+    def map_id_to_properties(self, id, ow):
+        id = unicode_str(id)
+        return self.id_to_props.get(id, ow)
+
+    def map_id_to_fallback(self, id, ow):
+        id = unicode_str(id)
+        return self.id_to_fall.get(id, ow)
+
+    def map_id_to_overlay(self, id, ow):
+        id = unicode_str(id)
+        return self.id_to_over.get(id, ow)
 
 
     # routines to work on ebook files that are not part of an opf manifest
@@ -609,3 +752,74 @@ class Wrapper(object):
                 data = utf8_str(data)
             with open(pathof(filepath),'wb') as fp:
                 fp.write(data)
+
+    def get_dictionary_dirs(self):
+        apaths = []
+        if sys.platform.startswith('darwin'):
+            apaths.append(unipath.abspath(os.path.join(self.appdir,"..","hunspell_dictionaries")))
+            apaths.append(unipath.abspath(os.path.join(self.usrsupdir,"hunspell_dictionaries")))
+        elif sys.platform.startswith('win'):
+            apaths.append(unipath.abspath(os.path.join(self.appdir,"hunspell_dictionaries")))
+            apaths.append(unipath.abspath(os.path.join(self.usrsupdir,"hunspell_dictionaries")))
+        else:
+            # Linux
+            system_hunspell_dicts = ''
+            share_prefix = ''
+            share_override = ''
+
+            # get the env var SIGIL_DICTIONARIES set at launch time.
+            if 'SIGIL_DICTIONARIES' in os.environ.keys():
+                system_hunspell_dicts = os.environ['SIGIL_DICTIONARIES']
+
+            # Runtime env var override of 'share/sigil' directory.
+            if 'SIGIL_EXTRA_ROOT' in os.environ.keys():
+                share_override = os.environ['SIGIL_EXTRA_ROOT']
+
+            # The sigil launch script in <install_prefix>/bin knows where Sigil's build time
+            # share prefix is and sets the env var SIGIL_SHARE_PREFIX to its value.
+            if 'SIGIL_SHARE_PREFIX' in os.environ.keys():
+                share_prefix = os.environ['SIGIL_SHARE_PREFIX']
+
+            # If someone didn't launch Sigil with its launch script, this may save the
+            # day (as long as the user didn't override SHARE_INSTALL_PREFIX at compile time).
+            if not len(share_prefix) and not len(share_override):
+                share_prefix = unipath.abspath(os.path.join(self.appdir,"..",".."))
+
+            # If the SIGIL_DICTIONARIES env var has content, use it for the dictionary location.
+            if len(system_hunspell_dicts):
+                for path in system_hunspell_dicts.split(':'):
+                    apaths.append(unipath.abspath(path.strip()))
+            else:
+                # If the 'share/sigil' location has indeed been overridden at runtime, use that.
+                if len(share_override):
+                    apaths.append(unipath.abspath(os.path.join(share_override, "hunspell_dictionaries")))
+                else:
+                    # Otherwise, use Sigil's bundled hunspell dictionary location.
+                    apaths.append(unipath.abspath(os.path.join(share_prefix, "share", 'sigil', "hunspell_dictionaries")))
+            apaths.append(unipath.abspath(os.path.join(self.usrsupdir,"hunspell_dictionaries")))
+        return apaths
+                        
+    def get_gumbo_path(self):
+        if sys.platform.startswith('darwin'):
+            lib_dir = unipath.abspath(os.path.join(self.appdir,"..","lib"))
+            lib_name = 'libsigilgumbo.dylib'
+        elif sys.platform.startswith('win'):
+            lib_dir = unipath.abspath(self.appdir)
+            lib_name = 'sigilgumbo.dll'
+        else:
+            lib_dir = unipath.abspath(self.appdir)
+            lib_name = 'libsigilgumbo.so'
+        return os.path.join(lib_dir, lib_name)
+            
+    def get_hunspell_path(self):
+        if sys.platform.startswith('darwin'):
+            lib_dir = unipath.abspath(os.path.join(self.appdir,"..","lib"))
+            lib_name = 'libhunspell.dylib'
+        elif sys.platform.startswith('win'):
+            lib_dir = unipath.abspath(self.appdir)
+            lib_name = 'hunspell.dll'
+        else:
+            lib_dir = unipath.abspath(self.appdir)
+            lib_name = 'libhunspell.so'
+        return os.path.join(lib_dir, lib_name)
+

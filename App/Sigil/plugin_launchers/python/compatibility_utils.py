@@ -37,8 +37,10 @@ iswindows = sys.platform.startswith('win')
 
 try:
     from urllib.parse import unquote
+    from urllib.parse import urlsplit
 except ImportError:
     from urllib import unquote
+    from urlparse import urlsplit
 
 try:
     import html
@@ -177,7 +179,7 @@ def utf8_str(p, enc='utf-8'):
     if isinstance(p, text_type):
         return p.encode('utf-8')
     if enc != 'utf-8':
-        return p.decode(enc).encode('utf-8')
+        return p.decode(enc, errors='replace').encode('utf-8')
     return p
 
 # convert string to be unicode encoded
@@ -186,7 +188,7 @@ def unicode_str(p, enc='utf-8'):
         return None
     if isinstance(p, text_type):
         return p
-    return p.decode(enc)
+    return p.decode(enc, errors='replace')
 
 ASCII_CHARS   = set(chr(x) for x in range(128))
 URL_SAFE      = set('ABCDEFGHIJKLMNOPQRSTUVWXYZ'
@@ -195,15 +197,20 @@ URL_SAFE      = set('ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 IRI_UNSAFE = ASCII_CHARS - URL_SAFE
 
 # returns a quoted IRI (not a URI)
+# modified to be scheme aware as external resources are possible in epub3
 def quoteurl(href):
     if isinstance(href,binary_type):
         href = href.decode('utf-8')
+    (ascheme, anetloc, apath, aquery, afragment) = urlsplit(href, scheme="", allow_fragments=True)
+    if ascheme != "":
+        ascheme += "://"
+        href = href[len(ascheme):]
     result = []
     for char in href:
         if char in IRI_UNSAFE:
             char = "%%%02x" % ord(char)
         result.append(char)
-    return ''.join(result)
+    return ascheme + ''.join(result)
 
 # unquotes url/iri
 def unquoteurl(href):
