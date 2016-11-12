@@ -35,7 +35,7 @@ import unipath
 from unipath import pathof
 import unicodedata
 
-_launcher_version=20160313
+_launcher_version=20160909
 
 _PKG_VER = re.compile(r'''<\s*package[^>]*version\s*=\s*["']([^'"]*)['"][^>]*>''',re.IGNORECASE)
 
@@ -56,43 +56,49 @@ ext_mime_map = {
                 '.svg'  : 'image/svg+xml',
                 '.xhtml': 'application/xhtml+xml',
                 '.html' : 'application/xhtml+xml',
+                '.htm'  : 'application/xhtml+xml',
                 '.otf'  : 'application/vnd.ms-opentype',
+                #'.otf'  : 'application/x-font-opentype',
                 '.ttf'  : 'application/x-font-ttf',
                 '.woff' : 'application/font-woff',
                 '.mp3'  : 'audio/mpeg',
+                '.m4a'  : 'audio/mp4',
                 '.mp4'  : 'video/mp4',
+                '.m4v'  : 'video/mp4',
                 '.css'  : 'text/css',
                 '.ncx'  : 'application/x-dtbncx+xml',
                 '.xml'  : 'application/oebs-page-map+xml',
                 '.opf'  : 'application/oebps-package+xml',
                 '.smil' : 'application/smil+xml',
-                '.pls'  : 'application/pls-xml',
+                '.pls'  : 'application/pls+xml',
+                '.xpgt' : 'application/adobe-page-template+xml',
                 '.js'   : 'text/javascript',
-                '.epub' : 'application/epub+zip',
                 #'.js'   : 'application/javascript',
-                #'.otf'  : 'application/x-font-opentype',
+                '.epub' : 'application/epub+zip',
                 }
 
 mime_base_map = {
-                'image/jpeg'                    : 'Images',
-                'image/png'                     : 'Images',
-                'image/gif'                     : 'Images',
-                'image/svg+xml'                 : 'Images',
-                'application/xhtml+xml'         : 'Text',
-                'application/x-font-ttf'        : 'Fonts',
-                'application/x-font-opentype'   : 'Fonts',
-                'application/vnd.ms-opentype'   : 'Fonts',
-                'application/font-woff'         : 'Fonts',
-                'audio/mpeg'                    : 'Audio',
-                'audio/mp3'                     : 'Audio',
-                'audio/mp4'                     : 'Audio',
-                'video/mp4'                     : 'Video',
-                'text/css'                      : 'Styles',
-                'application/x-dtbncx+xml'      : '',
-                'application/oebps-package+xml' : '',
-                'application/oebs-page-map+xml' : 'Misc',
-                'application/smil+xml'          : 'Misc',
-                'application/pls-xml'           : 'Misc',
+                'image/jpeg'                           : 'Images',
+                'image/png'                            : 'Images',
+                'image/gif'                            : 'Images',
+                'image/svg+xml'                        : 'Images',
+                'application/xhtml+xml'                : 'Text',
+                'application/x-font-ttf'               : 'Fonts',
+                'application/x-font-opentype'          : 'Fonts',
+                'application/vnd.ms-opentype'          : 'Fonts',
+                'application/font-woff'                : 'Fonts',
+                'audio/mpeg'                           : 'Audio',
+                'audio/mp3'                            : 'Audio',
+                'audio/mp4'                            : 'Audio',
+                'video/mp4'                            : 'Video',
+                'text/css'                             : 'Styles',
+                'application/x-dtbncx+xml'             : '',
+                'application/oebps-package+xml'        : '',
+                'application/oebs-page-map+xml'        : 'Misc',
+                'application/smil+xml'                 : 'Misc',
+                'application/adobe-page-template+xml'  : 'Misc',
+                'text/javascript'                      : 'Misc',
+                'application/pls+xml'                  : 'Misc',
                 }
 
 
@@ -102,6 +108,18 @@ PROTECTED_FILES = [
     'OEBPS/content.opf'
 ]
 
+TEXT_MIMETYPES = [
+                'image/svg+xml',
+                'application/xhtml+xml',
+                'text/css',
+                'application/x-dtbncx+xml',
+                'application/oebps-package+xml',
+                'application/oebs-page-map+xml',
+                'application/smil+xml',
+                'application/adobe-page-template+xml',
+                'text/javascript',
+                'application/pls+xml'
+]
 
 class WrapperException(Exception):
     pass
@@ -119,6 +137,7 @@ class Wrapper(object):
         # initialize the sigil cofiguration info passed in outdir with sigil.cfg
         self.appdir = None
         self.usrsupdir = None
+        self.linux_hunspell_dict_dirs = []
         self.selected = []
         cfg = ''
         with open(os.path.join(self.outdir, 'sigil.cfg'), 'rb') as f:
@@ -128,6 +147,8 @@ class Wrapper(object):
         if len(cfg_lst) >= 2:
             self.appdir = cfg_lst.pop(0)
             self.usrsupdir = cfg_lst.pop(0)
+            if not sys.platform.startswith('darwin') and not sys.platform.startswith('win'):
+                self.linux_hunspell_dict_dirs = cfg_lst.pop(0).split(":")
             self.selected = cfg_lst
         os.environ['SigilGumboLibPath'] = self.get_gumbo_path()
 
@@ -141,6 +162,7 @@ class Wrapper(object):
         self.spine_ppd = None
         self.spine = []
         self.guide = []
+        self.bindings = []
         self.package_tag = None
         self.epub_version = None
         # self.metadata_attr = None
@@ -161,6 +183,7 @@ class Wrapper(object):
             self.guide = op.get_guide()
             self.package_tag = op.get_package_tag()
             self.epub_version = op.get_epub_version()
+            self.bindings = op.get_bindings()
             # self.metadata = op.get_metadata()
             # self.metadata_attr = op.get_metadata_attr()
             self.metadataxml = op.get_metadataxml()
@@ -211,7 +234,7 @@ class Wrapper(object):
 
     def build_manifest_xml(self):
         manout = []
-        manout.append('<manifest>\n')
+        manout.append('  <manifest>\n')
         for id in sorted(self.id_to_mime):
             href = quoteurl(self.id_to_href[id])
             mime = self.id_to_mime[id]
@@ -227,8 +250,8 @@ class Wrapper(object):
             overlay = self.id_to_over[id]
             if overlay is not None:
                 over = ' media-overlay="%s"' % overlay
-            manout.append('<item id="%s" href="%s" media-type="%s"%s%s%s />\n' % (id, href, mime, props, fall, over))
-        manout.append('</manifest>\n')
+            manout.append('    <item id="%s" href="%s" media-type="%s"%s%s%s />\n' % (id, href, mime, props, fall, over))
+        manout.append('  </manifest>\n')
         return "".join(manout)
 
     def build_spine_xml(self):
@@ -244,7 +267,7 @@ class Wrapper(object):
         pagemapid = self.getpagemapid()
         if pagemapid is not None:
             map = ' page-map="%s"' % pagemapid
-        spineout.append('<spine%s%s%s>\n' %(ppd, ncx, map))
+        spineout.append('  <spine%s%s%s>\n' %(ppd, ncx, map))
         for (id, linear, properties) in self.spine:
             lin = ''
             if linear is not None:
@@ -252,18 +275,28 @@ class Wrapper(object):
             props = ''
             if properties is not None:
                 props = ' properties="%s"' % properties
-            spineout.append('<itemref idref="%s"%s%s/>\n' % (id, lin, props))
-        spineout.append('</spine>\n')
+            spineout.append('    <itemref idref="%s"%s%s/>\n' % (id, lin, props))
+        spineout.append('  </spine>\n')
         return "".join(spineout)
 
     def build_guide_xml(self):
         guideout = []
-        guideout.append('<guide>\n')
-        for (type, title, href) in self.guide:
-            href = quoteurl(href)
-            guideout.append('<reference type="%s" href="%s" title="%s"/>\n' % (type, href, title))
-        guideout.append('</guide>\n')
+        if len(self.guide) > 0 or self.epub_version.startswith('2'):
+            guideout.append('  <guide>\n')
+            for (type, title, href) in self.guide:
+                href = quoteurl(href)
+                guideout.append('    <reference type="%s" href="%s" title="%s"/>\n' % (type, href, title))
+            guideout.append('  </guide>\n')
         return "".join(guideout)
+
+    def build_bindings_xml(self):
+        bindout = []
+        if len(self.bindings) > 0 and self.epub_version.startswith('3'):
+            bindout.append('  <bindings>\n')
+            for (mtype, handler) in self.bindings:
+                bindout.append('    <mediaType media-type="%s" handler="%s"/>\n' % (mtype, handler))
+            bindout.append('  </bindings>\n')
+        return "".join(bindout)
 
     def build_opf(self):
         data = []
@@ -273,6 +306,7 @@ class Wrapper(object):
         data.append(self.build_manifest_xml())
         data.append(self.build_spine_xml())
         data.append(self.build_guide_xml())
+        data.append(self.build_bindings_xml())
         data.append('</package>\n')
         return "".join(data)
 
@@ -349,6 +383,24 @@ class Wrapper(object):
                 properties = properties.lower()
             spine.append((sid, linear, properties))
         self.spine = spine
+        self.modified['OEBPS/content.opf'] = 'file'
+
+    def getbindings_epub3(self):
+        return self.bindings
+
+    def setbindings_epub3(self, new_bindings):
+        bindings = []
+        for (mtype, handler) in new_bindings:
+            mtype = unicode_str(mtype)
+            handler = unicode_str(handler)
+            if mtype is None or mtype == "":
+                continue
+            if handler is None or handler == "":
+                continue
+            if handler not in self.id_to_href:
+                raise WrapperException('Handler not in Manifest')
+            bindings.append((mtype, handler))
+        self.bindings = bindings
         self.modified['OEBPS/content.opf'] = 'file'
 
     def spine_insert_before(self, pos, sid, linear, properties=None):
@@ -466,7 +518,7 @@ class Wrapper(object):
         with open(filepath,'rb') as fp:
             data = fp.read()
         mime = self.id_to_mime.get(id,'')
-        if mime.endswith('+xml'):
+        if mime in TEXT_MIMETYPES:
             data = unicode_str(data)
         return data
 
@@ -482,7 +534,7 @@ class Wrapper(object):
         base = os.path.dirname(filepath)
         if not unipath.exists(base):
             os.makedirs(pathof(base))
-        if mime.endswith('+xml') or isinstance(data, text_type):
+        if mime in TEXT_MIMETYPES or isinstance(data, text_type):
             data = utf8_str(data)
         with open(filepath,'wb') as fp:
             fp.write(data)
@@ -517,7 +569,7 @@ class Wrapper(object):
         base = os.path.dirname(filepath)
         if not unipath.exists(base):
             os.makedirs(base)
-        if mime.endswith('+xml') or isinstance(data, text_type):
+        if mime in TEXT_MIMETYPES or isinstance(data, text_type):
             data = utf8_str(data)
         with open(filepath,'wb') as fp:
             fp.write(data)
@@ -605,14 +657,17 @@ class Wrapper(object):
         basename = unicode_str(basename)
         ext = os.path.splitext(basename)[1]
         ext = ext.lower()
-        mime = ext_mime_map.get(ext,None)
+        mime = ext_mime_map.get(ext,"")
         if mime.startswith("audio"):
             base = 'Audio'
         elif mime.startswith("video"):
             base = "Video"
         else:
             base = mime_base_map.get(mime,'Misc')
-        href = base + "/" + basename
+        if base == "":
+            href = basename
+        else:
+            href = base + "/" + basename
         return self.href_to_id.get(href,ow)
 
     def map_id_to_href(self, id, ow):
@@ -642,9 +697,10 @@ class Wrapper(object):
         id = unicode_str(book_href)
         if id in self.id_to_href:
             raise WrapperException('Incorrect interface routine - use readfile')
-        # handle special case of trying to read the opf
+        # handle special case of trying to read the opf after it has been modified
         if id is not None and id == "OEBPS/content.opf":
-            return self.build_opf()
+            if id in self.modified:
+                return self.build_opf()
         filepath = self.id_to_filepath.get(id, None)
         if filepath is None:
             raise WrapperException('book href does not exist')
@@ -657,11 +713,11 @@ class Wrapper(object):
         basename = os.path.basename(filepath)
         ext = os.path.splitext(basename)[1]
         ext = ext.lower()
-        mime = ext_mime_map.get(ext,'')
+        mime = ext_mime_map.get(ext,"")
         data = b''
         with open(filepath,'rb') as fp:
             data = fp.read()
-        if mime.endswith('+xml'):
+        if mime in TEXT_MIMETYPES:
             data = unicode_str(data)
         return data
 
@@ -763,42 +819,11 @@ class Wrapper(object):
             apaths.append(unipath.abspath(os.path.join(self.usrsupdir,"hunspell_dictionaries")))
         else:
             # Linux
-            system_hunspell_dicts = ''
-            share_prefix = ''
-            share_override = ''
-
-            # get the env var SIGIL_DICTIONARIES set at launch time.
-            if 'SIGIL_DICTIONARIES' in os.environ.keys():
-                system_hunspell_dicts = os.environ['SIGIL_DICTIONARIES']
-
-            # Runtime env var override of 'share/sigil' directory.
-            if 'SIGIL_EXTRA_ROOT' in os.environ.keys():
-                share_override = os.environ['SIGIL_EXTRA_ROOT']
-
-            # The sigil launch script in <install_prefix>/bin knows where Sigil's build time
-            # share prefix is and sets the env var SIGIL_SHARE_PREFIX to its value.
-            if 'SIGIL_SHARE_PREFIX' in os.environ.keys():
-                share_prefix = os.environ['SIGIL_SHARE_PREFIX']
-
-            # If someone didn't launch Sigil with its launch script, this may save the
-            # day (as long as the user didn't override SHARE_INSTALL_PREFIX at compile time).
-            if not len(share_prefix) and not len(share_override):
-                share_prefix = unipath.abspath(os.path.join(self.appdir,"..",".."))
-
-            # If the SIGIL_DICTIONARIES env var has content, use it for the dictionary location.
-            if len(system_hunspell_dicts):
-                for path in system_hunspell_dicts.split(':'):
-                    apaths.append(unipath.abspath(path.strip()))
-            else:
-                # If the 'share/sigil' location has indeed been overridden at runtime, use that.
-                if len(share_override):
-                    apaths.append(unipath.abspath(os.path.join(share_override, "hunspell_dictionaries")))
-                else:
-                    # Otherwise, use Sigil's bundled hunspell dictionary location.
-                    apaths.append(unipath.abspath(os.path.join(share_prefix, "share", 'sigil', "hunspell_dictionaries")))
+            for path in self.linux_hunspell_dict_dirs:
+                apaths.append(unipath.abspath(path.strip()))
             apaths.append(unipath.abspath(os.path.join(self.usrsupdir,"hunspell_dictionaries")))
         return apaths
-                        
+
     def get_gumbo_path(self):
         if sys.platform.startswith('darwin'):
             lib_dir = unipath.abspath(os.path.join(self.appdir,"..","lib"))
@@ -810,7 +835,7 @@ class Wrapper(object):
             lib_dir = unipath.abspath(self.appdir)
             lib_name = 'libsigilgumbo.so'
         return os.path.join(lib_dir, lib_name)
-            
+
     def get_hunspell_path(self):
         if sys.platform.startswith('darwin'):
             lib_dir = unipath.abspath(os.path.join(self.appdir,"..","lib"))
@@ -822,4 +847,3 @@ class Wrapper(object):
             lib_dir = unipath.abspath(self.appdir)
             lib_name = 'libhunspell.so'
         return os.path.join(lib_dir, lib_name)
-

@@ -25,7 +25,7 @@ SPECIAL_HANDLING_TYPES = ['xmlheader', 'doctype', 'comment']
 MAX_TAG_LEN = 20
 
 VOID_TAGS = ("area","base","basefont","bgsound","br","col","command",
-    "embed","event-source","frame","hr","image","img","input","keygen",
+    "embed","event-source","frame","hr","img","input","keygen",
     "link","menuitem","meta","param","source","spacer","track","wbr",
     "mbp:pagebreak")
 
@@ -311,7 +311,7 @@ def perform_sanity_check(apath):
     if has_error:
         for line, col, msg in errlist:
             msg += '.  near column %d' % col
-            res = "%s%s%s%s%d%s%s" % ('error', sep, filename, sep, line, sep, msg)
+            res = "%s%s%s%s%d%s%d%s%s" % ('error', sep, filename, sep, line, sep, -1, sep, msg)
             reslst.append(res)
     return reslst
             
@@ -327,7 +327,7 @@ def main():
 </head>
 <body>
 <p>this&nbsp;is&#160;the&#xa0;<b><i>copyright</i></b> symbol "&copy;"</p>
-<p><!--This is a comment--></p>
+<p><!--This_is_a_&<>comment--></p>
 <br></br>
 </html>
 '''

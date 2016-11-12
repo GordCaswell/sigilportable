@@ -1,3 +1,94 @@
+Sigil-0.9.7
+   Bug Fixes
+    - Allow tags in the svg and mathml namespace to automtically self-close if empty to help work around
+         a bug in Kindlegen that will not seem to accept a closing svg image tag even though image is non-void
+    - Prevent TextTab from constantly recentering page when focus is lost
+    - Fix bugs in plugin basename_to_id when used with xpgt files or any unrecognized extensions
+    - Fix typos in pls mimetype in plugins
+    - Fix code synchronization issues among 3 places where file extensions are mapped to mimetypes
+    - Fix plugin readotherfile interface to rebuild the opf on the fly only if it has been modified
+    - Fix plugin validation issues with integer vs string representations of line number and character offsets
+    - Fix duplicate filename in multiple directories bug when updating CSS urls
+    - Fix bug in page-map.xml mimetype when "Add Existing ..." is used
+    - Fix undefined behaiviour shifting signed negative values in 3rdparty libs and fix many warnings
+    - Fix text vs binary file type recognition in the plugin interface (CSS and js files are text not binary) 
+    - Fix too small toolbar icons on high dpi displays
+    - Fix bug that caused text highlighting to get lost on some systems when doing a CSS Find & Replace.
+    - Fix bug in plugin interface basename_to_id to recognize .htm extensions
+    - Fix bug in epub3 semantic popups to always refect the local name of epub:type setting
+    - Fix bug where creation on an HTML TOC could overwrite an existing Nav under epub3
+    - Fix manifest id not starting with alpha character bug
+
+  New Features
+    - Extend validation plugin interface with add_extended_result() method to allow better cursor positioning
+    - Extend TextTab and  Tabs derived by it to position cursor based on offset
+    - Allow editing of page-map.xml files, xpgt files and other misc xml based files inside Sigil
+    - Update Windows builds use Python 3.5, VS2015
+    - Update Mac OS X builds and build instructions to use Python-3.5.2
+    - Remove support for python2.7 *only* plugins and simply Manage Plugins settings
+    - Update to Qt 5.6.1-1 with QtWebKit added back for release builds for Windows (VS2015)  and Mac OSX
+    - Update Mac OS X and Linux build instruction documentation for recent changes
+    - Allow Linux Dictionaries to look up default paths  for dictionaries passed in by build cmake settings
+    - Mke the columns in the Manage Plugins table be sortable by the user
+    - Better detect undefined and non-existing url fragments to prevent issues when splitting or merging files
+    - Make tooltips for Run Plugin Icons show the name of the selected plugin on hover
+    - Upgrade from jquery 1.6.2 to version 2.2.4
+    - Upgrade from jquery.scrollTo 1.4.2 to version 2.1.2
+    - Upgrade to double sized 48x48 pixel icons for High DPI displays, Special Thanks to PatNY for creating our icons
+
+
+Sigil-0.9.6
+   Bug Fixes
+    - Make StdWarningDialog resizeable when "Show Details" is used
+    - Fix CleanSource svg prefix removal bug that sometimes broke valid svg code 
+    - Remove svg image and html5 menuitem from the list of void elements in the Sigil and plugin code
+    - Properly xml escape "&" in metadata attribute values
+    - Properly perform source updates on epub load even when they do not follow recommended spec
+    - Make handling of comments in both xhtml and xml more roubst
+    - Properly url escape css file names to handle css files with spaces in them
+    - Try to make direct editing of content.opf more safe by auto-fixing errors when possible
+    - Properly handle WellFormed checks for pure XML in XMLResource.cpp by using embedded python3 lxml
+    - Make opf_newparser.py and xmlprocessor.py more robust to broken user input in content.opf
+    - Make ProcessXML (repairXML in xmlprocessor.py) - leave untouched anything well-formed
+    - Fix thinko in plugin bookcontainer.py and outputcontainer.py contributed by wrCisco 
+    - Fix for improper encoding in plugins on Mac OS X due to missing inherited plugin environment
+    - Fix for typos in epub xmlns when splitting epub3 ebooks in BookView
+    - Update testplugin_v012.zip to testplugin_v013.zip to handle sgc-nav.css new feature
+    - Fix bugs in DeleteUnusedStyles when selector exists more than once in the same stylesheet
+    - Fix bugs in DeleteUnusedStyles when group selectors span more than one line
+    - Fix bugs in Reports: CSS Styles missing cases when selector exists more than once
+    - Fix bug in Reports: All Files to use Landmark Semantics under epub3 not guide semantics
+    - Fix bug, slow in loading ini when too large clipboard history, user can delete them via dialog
+    - Stop cosmetic double-spaces being introduced into OPF manifest, spine and guide entries
+    - Fix bug when user selects too much in BookView and then tries to change case
+    - Fix bug in Delete Unused Media when css urls do not use quotes 
+    - Try to set all ways of updating the ncx to use 2 character indentation of head element
+    - Fix Building Relocatable Python on Mac build instructions to remove BeautifulSoup4 requirement
+    - Fix for generating empty guide for epub3 when in plugins
+
+  New Features
+    - create sgc-nav.css stylesheet for nav and allow templates in Prefs Dir for user to control it 
+    - Add General Setting to allow user to set own temporary directory location
+    - Add Qt Stylesheet support - Recognize and load "qt_styles.qss" file if stored in Sigil Preferences folder
+    - Extended the plugin interface to add support for epub3 bindings elements
+    - Add option + forward delete shortcut to active Metadata Editor remove
+
+
+Sigil-0.9.5
+   Bug Fixes
+    - Fix regression when ImportHTML in gathering HTML based DC. metadata
+    - Fix regression - remove incorrect use of opf:scheme from dc:creator and dc:contributor under epub2
+    - Fix regression - the guide reference tag is always a void tag
+    - Fix issues with hunspell spell checking under Windows when non-ascii paths to dictionaries
+    - Fix issues with overridding the prefs directory on Windows with non-ascii paths
+    - Fix broken manual "Check" button on W3C stylesheet validation's generated html form.
+    - Fix media-type recognition for .m4a and .m4v file extenstions in main Sigil and plugin code
+    - Treat ruby and rt as inline tags when pretty-printing in Sigils and for plugins
+
+   New Features
+    - Allow user to choose what level of CSS gets used in the "Validate Stylesheets
+         With W3C" tool via user preference (General).
+
 Sigil-0.9.4
    Bug Fixes
     - Prevent the use of zero length key fields when obfuscating fonts

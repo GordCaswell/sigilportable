@@ -27,15 +27,65 @@
 
 import sys, os, codecs
 from urllib.parse import unquote
+from urllib.parse import urlsplit
 
-# unquotes url/iri
+ASCII_CHARS   = set(chr(x) for x in range(128))
+URL_SAFE      = set('ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+                    'abcdefghijklmnopqrstuvwxyz'
+                    '0123456789' '#' '_.-/~')
+IRI_UNSAFE = ASCII_CHARS - URL_SAFE
+
+def quoteurl(href):
+    if isinstance(href,bytes):
+        href = href.decode('utf-8')
+    (scheme, netloc, path, query, fragment) = urlsplit(href, scheme="", allow_fragments=True)
+    if scheme != "":
+        scheme += "://"
+        href = href[len(scheme):]
+    result = []
+    for char in href:
+        if char in IRI_UNSAFE:
+            char = "%%%02x" % ord(char)
+        result.append(char)
+    return scheme + ''.join(result)
+
 def unquoteurl(href):
     if isinstance(href,bytes):
         href = href.decode('utf-8')
     href = unquote(href)
     return href
 
-_OPF_PARENT_TAGS = ['xml', 'package', 'metadata', 'dc-metadata', 'x-metadata', 'manifest', 'spine', 'tours', 'guide', 'bindings']
+# encode to make xml safe
+def xmlencode(data):
+    if data is None:
+        return ''
+    newdata = data
+    newdata = newdata.replace('&', '&amp;')
+    newdata = newdata.replace('<', '&lt;')
+    newdata = newdata.replace('>', '&gt;')
+    newdata = newdata.replace('"', '&quot;')
+    return newdata
+
+#decode xml encoded strings
+def xmldecode(data):
+    if data is None:
+        return ''
+    newdata = data
+    newdata = newdata.replace('&quot;', '"')
+    newdata = newdata.replace('&gt;', '>')
+    newdata = newdata.replace('&lt;', '<')
+    newdata = newdata.replace('&amp;', '&')
+    return newdata
+
+SPECIAL_HANDLING_TAGS = {
+    '?xml'     : ('xmlheader', -1), 
+    '!--'      : ('comment', -3),
+    '!DOCTYPE' : ('doctype', -1),
+}
+
+SPECIAL_HANDLING_TYPES = ['xmlheader', 'doctype', 'comment']
+
+_OPF_PARENT_TAGS = ['package', 'metadata', 'dc-metadata', 'x-metadata', 'manifest', 'spine', 'tours', 'guide', 'bindings']
 
 class Opf_Parser(object):
 
@@ -102,7 +152,7 @@ class Opf_Parser(object):
                 self.metadata.append((tname, tcontent, tattr))
                 continue
             # manifest
-            if tname == "item" and  prefix.endswith("manifest"):
+            if tname == "item" and  "manifest" in prefix:
                 nid = "xid%03d" %  cnt
                 cnt += 1
                 id = tattr.pop("id",nid)
@@ -115,19 +165,19 @@ class Opf_Parser(object):
             if tname == "spine":
                 self.spine_attr = tattr
                 continue
-            if tname == "itemref" and prefix.endswith("spine"):
+            if tname == "itemref" and "spine" in prefix:
                 idref = tattr.pop("idref","")
                 self.spine.append((idref, tattr))
                 continue
             # guide
-            if tname == "reference" and  prefix.endswith("guide"):
+            if tname == "reference" and  "guide" in prefix:
                 type = tattr.pop("type","")
                 title = tattr.pop("title","")
                 href = unquoteurl(tattr.pop("href",""))
                 self.guide.append((type, title, href))
                 continue
             # bindings
-            if tname in ["mediaType", "mediatype"] and prefix.endswith("bindings"):
+            if tname in ["mediaType", "mediatype"] and "bindings" in prefix:
                 mtype = tattr.pop("media-type","")
                 handler = tattr.pop("handler","")
                 self.bindings.append((mtype, handler))
@@ -173,20 +223,25 @@ class Opf_Parser(object):
             p += 1
             while p < n and s[p:p+1] == ' ' : p += 1
         b = p
+        # handle comment special case as there may be no spaces to 
+        # delimit name begin or end 
+        if s[b:].startswith('!--'):
+            p = b+3
+            tname = '!--'
+            ttype, backstep = SPECIAL_HANDLING_TAGS[tname]
+            tattr['special'] = s[p:backstep].strip()
+            return tname, ttype, tattr
         while p < n and s[p:p+1] not in ('>', '/', ' ', '"', "'","\r","\n") : p += 1
         tname=s[b:p].lower()
         # remove redundant opf: namespace prefixes on opf tags
         if tname.startswith("opf:"):
             tname = tname[4:]
-        # some special cases
-        # handle comments with no spaces to delimit 
-        if tname.startswith("!--"):
-            tname = "!--"
-            ttype = 'single'
-            comment = s[4:-3].strip()
-            tattr['comment'] = comment
-        if tname == "?xml":
-            tname = "xml"
+        # more special cases
+        if tname == '!doctype':
+            tname = '!DOCTYPE'
+        if tname in SPECIAL_HANDLING_TAGS:
+            ttype, backstep = SPECIAL_HANDLING_TAGS[tname]
+            tattr['special'] = s[p:backstep]
         if ttype is None:
             # parse any attributes of begin or single tags
             while s.find('=',p) != -1 :
@@ -229,6 +284,17 @@ class Opf_Parser(object):
         (keylist, vallist) = self.xlate_dict(attr)
         return (ver, uid, keylist, vallist)
 
+    def get_metadata_attr(self):
+        (keylist, vallist) = self.xlate_dict(self.metadata_attr)
+        return (keylist, vallist)
+
+    def get_metadata(self):
+        metadata = []
+        for (mname, mcontent, attr) in self.metadata:
+            (keylist, vallist) = self.xlate_dict(attr)
+            metadata.append((mname, mcontent, keylist, vallist))
+        return metadata
+
     def get_manifest(self):
         manlist = []
         for (id, href, mtype, attr) in self.manifest:
@@ -252,23 +318,121 @@ class Opf_Parser(object):
         for (gtype, gtitle,  ghref) in self.guide:
             guide.append((gtype, gtitle, ghref))
         return guide
-
+    
     def get_bindings(self):
         bindings = []
         for (mtype, handler) in self.bindings:
             bindings.append((mtype, handler))
         return bindings
 
-    def get_metadata_attr(self):
-        (keylist, vallist) = self.xlate_dict(self.metadata_attr)
-        return (keylist, vallist)
-
-    def get_metadata(self):
-        metadata = []
+    def convert_package_to_xml(self):
+        xmlres = []
+        (ver, uid, attr) = self.package
+        xmlres.append('<package version="%s" unique-identifier="%s"' % (ver, uid))
+        for key in attr:
+            val = attr[key]
+            val = xmlencode(val)
+            xmlres.append(' %s="%s"' % (key, val))
+        xmlres.append('>\n')
+        return "".join(xmlres)
+                          
+    def convert_metadata_attr_to_xml(self):
+        xmlres = []
+        attr = self.metadata_attr
+        xmlres.append('  <metadata')
+        for key in attr:
+            val= attr[key]
+            val= xmlencode(val)
+            xmlres.append(' %s="%s"' % (key, val))
+        xmlres.append('>\n')
+        return "".join(xmlres)
+        
+    def convert_metadata_entries_to_xml(self):
+        xmlres = []
         for (mname, mcontent, attr) in self.metadata:
-            (keylist, vallist) = self.xlate_dict(attr)
-            metadata.append((mname, mcontent, keylist, vallist))
-        return metadata
+            xmlres.append('    <%s' % mname)
+            for key in attr:
+                val= attr[key]
+                val= xmlencode(val)
+                xmlres.append(' %s="%s"' % (key, val))
+            if mcontent is None or mcontent == "":
+                xmlres.append('/>\n')
+            else:
+                content= xmlencode(mcontent)
+                xmlres.append('>%s</%s>\n' % (content, mname))
+        return "".join(xmlres)
+
+    def convert_manifest_entries_to_xml(self):
+        xmlres = []
+        for (id, href, mtype, attr) in self.manifest:
+            url = quoteurl(href)
+            xmlres.append('    <item id="%s" href="%s" media-type="%s"' % (id, url, mtype))
+            for key in attr:
+                val= attr[key]
+                val= xmlencode(val)
+                xmlres.append(' %s="%s"' % (key, val))
+            xmlres.append('/>\n')
+        return "".join(xmlres)
+
+    def convert_spine_attr_to_xml(self):
+        xmlres = []
+        attr = self.spine_attr
+        xmlres.append('  <spine')
+        for key in attr:
+            val= attr[key]
+            val= xmlencode(val)
+            xmlres.append(' %s="%s"' % (key, val))
+        xmlres.append('>\n')
+        return "".join(xmlres)
+
+    def convert_spine_entries_to_xml(self):
+        xmlres=[]
+        for (idref, attr) in self.spine:
+            xmlres.append('    <itemref idref="%s"' % idref)
+            for key in attr:
+                val= attr[key]
+                val= xmlencode(val)
+                xmlres.append(' %s="%s"' % (key, val))
+            xmlres.append('/>\n')
+        return "".join(xmlres)
+    
+    def convert_guide_entries_to_xml(self):
+        xmlres=[]
+        for (gtype, gtitle, ghref) in self.guide:
+            url = quoteurl(ghref)
+            xmlres.append('    <reference type="%s" title="%s" href="%s"/>\n' % (gtype, gtitle, url))
+        return "".join(xmlres)
+                          
+    def convert_binding_entries_to_xml(self):
+        xmlres=[]
+        for (mtype, handler) in self.bindings:
+            xmlres.append('  <mediaType media-type="%s" handler="%s"/>\n' % (mtype, handler))
+        return "".join(xmlres)
+
+    def rebuild_opfxml(self):
+        xmlres=[]
+        xmlres.append('<?xml version="1.0" encoding="utf-8"?>\n')
+        xmlres.append(self.convert_package_to_xml())
+        xmlres.append(self.convert_metadata_attr_to_xml())
+        xmlres.append(self.convert_metadata_entries_to_xml())
+        xmlres.append('  </metadata>\n')
+        xmlres.append('  <manifest>\n')
+        xmlres.append(self.convert_manifest_entries_to_xml())
+        xmlres.append('  </manifest>\n')
+        xmlres.append(self.convert_spine_attr_to_xml())
+        xmlres.append(self.convert_spine_entries_to_xml())
+        xmlres.append('  </spine>\n')
+        (opfver, uid, attr) = self.package
+        if len(self.guide) > 0 or opfver.startswith('2'):
+            xmlres.append('  <guide>\n')
+            xmlres.append(self.convert_guide_entries_to_xml())
+            xmlres.append('  </guide>\n')
+        if len(self.bindings) > 0 and opver.startswith('3'):
+            xmlres.append('  <bindings>\n')
+            xmlres.append(self.guide.convert_binding_entries_to_xml())
+            xmlres.append('  </bindings>\n')
+        xmlres.append('</package>\n')
+        return "".join(xmlres)
 
 
 def parseopf(opfdata):
@@ -278,7 +442,7 @@ def parseopf(opfdata):
 
 def main():
     argv = sys.argv
-    if argv[1] is None:
+    if len(argv) < 2:
         sys.exit(0)
 
     if not os.path.exists(argv[1]):
@@ -289,15 +453,18 @@ def main():
         data = data.decode('utf-8')
 
     op = parseopf(data)
-    print(op.get_package())
-    print(op.get_metadata_attr())
-    print(op.get_metadata())
-    print(op.get_manifest())
-    print(op.get_spine_attr())
-    print(op.get_spine())
-    print(op.get_guide())
-    print(op.get_bindings())
-    return 0
+    # print(op.get_package())
+    # print(op.get_metadata_attr())
+    # print(op.get_metadata())
+    # print(op.get_manifest())
+    # print(op.get_spine_attr())
+    # print(op.get_spine())
+    # print(op.get_guide())
+    # print(op.get_bindings())
+    print(op.rebuild_opfxml())
+    return 0    
+
+
 
 
 if __name__ == '__main__':
